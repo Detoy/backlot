@@ -220,6 +220,28 @@ def test_jira_404s_a_project_role_an_anonymous_caller_cannot_see(client, headers
         assert r.json()["errorMessages"] == [f"No project could be found with key '{key}'."]
 
 
+@pytest.mark.parametrize("headers", UNRESOLVABLE)
+@pytest.mark.parametrize(
+    "token,kind",
+    [
+        ("999999999", "id"),
+        ("NOSUCHKEY", "key"),
+    ],
+)
+def test_jira_project_role_404_names_id_when_the_path_is_digits(client, headers, token, kind):
+    """Real Jira reads an all-digit project path segment as an id and says so in the 404; anything
+    else is a key. Measured against Jira Cloud on 2026-10-13 (issue #674):
+    `project/999999999/role` and `…/role/10002` answer `with id '999999999'`, and
+    `project/NOSUCHKEY/role` answers `with key 'NOSUCHKEY'`."""
+    for path in (
+        f"/rest/api/3/project/{token}/role",
+        f"/rest/api/3/project/{token}/role/10002",
+    ):
+        r = client.get(f"/atlassian{path}", headers=headers)
+        assert r.status_code == 404, path
+        assert r.json()["errorMessages"] == [f"No project could be found with {kind} '{token}'."]
+
+
 def test_jira_refuses_a_bearer_it_cannot_read_as_a_connect_token(client):
     """A bearer is not the Basic pair: Jira does not go anonymous for one it cannot resolve, it
     refuses with 403 and a body that is neither API's envelope. A Backlot token is an opaque

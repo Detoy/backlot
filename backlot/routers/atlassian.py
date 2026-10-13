@@ -415,6 +415,11 @@ def _require_project(request: Request, conn, key: str) -> str:
     ecosystem.atlassian.net, whose `AA` is public, and brekkylab.atlassian.net, which has no such
     key, on 2026-09-04. An unreachable project is reported as an absent one, the way
     `issue/{key}` reports an issue the caller cannot see.
+
+    The 404 names the path segment as an `id` when it is all ASCII digits, and as a `key`
+    otherwise — measured against Jira Cloud on 2026-10-13: `project/999999999/role` and
+    `…/role/10002` answer `with id '999999999'`, and `project/NOSUCHKEY/role` answers
+    `with key 'NOSUCHKEY'`.
     """
     ids = auth.visible_ids(request, _jira_caller(request))
     container = _jira_container_for_key(conn, key, request)
@@ -426,7 +431,9 @@ def _require_project(request: Request, conn, key: str) -> str:
         ids is None or store.has_visible_document(conn, "jira", container, ids)
     ):
         return container
-    raise HTTPException(status_code=404, detail=f"No project could be found with key '{key}'.")
+    # Same digit rule `_resolve_jira_key` uses for issue ids: an all-ASCII-digit segment is an id.
+    kind = "id" if key.isascii() and key.isdigit() else "key"
+    raise HTTPException(status_code=404, detail=f"No project could be found with {kind} '{key}'.")
 
 
 @router.get("/rest/api/3/project/{key}/role")
