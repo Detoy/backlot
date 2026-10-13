@@ -191,6 +191,20 @@ def test_github_code_search_link_header_keeps_first_and_last_on_every_page():
     assert "per_page=30" in h(1, per_page=30)
 
 
+def test_github_code_search_link_header_writes_page_before_per_page():
+    """Every rel of a `/search/code` page link writes `q`, then `page`, then `per_page`, as real
+    does (the measurement is on :func:`pagination.github_code_search_link_header`)."""
+    h = pg.github_code_search_link_header("http://x/search/code", {"q": "def"}, 5, 5, 45)
+    urls = re.findall(r"<([^>]*)>", h)
+    assert _link_rel_names(h) == ["next", "prev", "first", "last"]
+    assert [u.split("?", 1)[1] for u in urls] == [
+        "q=def&page=6&per_page=5",
+        "q=def&page=4&per_page=5",
+        "q=def&page=1&per_page=5",
+        "q=def&page=9&per_page=5",
+    ]
+
+
 def test_github_cursor_offset_prefers_the_cursor_over_the_page():
     """A cursor OVERRIDES `page` rather than adding to it. Measured the same day: `?per_page=2` at
     `page=50` with page 1's `after` cursor answers the two rows `page=2` answers, where `page=50`

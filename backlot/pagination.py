@@ -344,6 +344,10 @@ def github_code_search_link_header(
       spelt: no `per_page` in the query links `per_page=30`, `?per_page=500` on 1,808 hits links
       `per_page=100` (its cap) and `?per_page=0` links `per_page=30`, where a listing omits an
       unsent size and echoes a sent one verbatim. This cell it shares with the cursor listing.
+    * the query is written `q`, then `page`, then `per_page`, on every rel and whatever order the
+      request sent them in: measured on 2026-10-13, `?q=repo:psf/requests+def&per_page=5&page=2`
+      and the three other orders of those parameters each link next as
+      `q=repo%3Apsf%2Frequests%20def&page=3&per_page=5`.
 
     `/search/issues` shares none of that and pages by :func:`github_link_header`. A result set that
     fits one page carries no header, which is the one rule all three surfaces share.
@@ -360,7 +364,7 @@ def github_code_search_link_header(
         return None
 
     def link(p: int) -> str:
-        return _page_url(url_no_query, {**params, "per_page": per_page, "page": p})
+        return _page_url(url_no_query, {**params, "page": p, "per_page": per_page})
 
     parts = []
     if page < last_page:

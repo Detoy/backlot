@@ -2974,6 +2974,26 @@ def test_github_a_page_url_omits_a_page_size_the_caller_did_not_send(
 
 
 @pytest.mark.parametrize(
+    "qs",
+    [
+        "q=extension:md&per_page=2&page=1",
+        "q=extension:md&page=1&per_page=2",
+        "per_page=2&q=extension:md",
+    ],
+)
+def test_github_code_search_page_links_write_page_before_per_page(gh_client, gh_admin_h, qs):
+    """Real writes a code-search page link's query as `q`, `page`, `per_page`, whatever order the
+    request sent them in (measured on :func:`backlot.pagination.github_code_search_link_header`),
+    so each order here links the same url."""
+    c, _ = gh_client
+    r = c.get(f"/github/search/code?{qs}", headers=gh_admin_h)
+    assert r.status_code == 200
+    rels = _link_rels(r.headers["Link"])
+    assert rels["next"].split("?", 1)[1] == "q=extension%3Amd&page=2&per_page=2"
+    assert rels["first"].split("?", 1)[1] == "q=extension%3Amd&page=1&per_page=2"
+
+
+@pytest.mark.parametrize(
     "path, q, page_one",
     [
         ("/github/search/code", "extension:md", {"next", "first", "last"}),
