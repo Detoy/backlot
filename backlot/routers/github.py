@@ -473,7 +473,7 @@ def refused_a_credential(request: Request) -> bool:
     if auth.bearer_token(request) is None or auth.resolve_bearer(request) is not None:
         return False
     # Space only: `split(None)` would treat a tab as the same separator, but real keeps the five
-    # headers when the scheme and token are joined by a tab (issue #707).
+    # headers when the scheme and token are joined by a tab.
     hdr = request.headers.get("authorization") or ""
     scheme, sep, _rest = hdr.partition(" ")
     return bool(sep) and scheme.lower() in ("bearer", "token")

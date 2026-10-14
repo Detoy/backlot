@@ -2301,9 +2301,8 @@ def test_github_bad_credential_with_a_tab_after_its_scheme_carries_ratelimit_hea
     gh_client, authorization
 ):
     """A bad credential with a tab after its scheme is still 401 Bad credentials, but real puts
-    the five `x-ratelimit-*` on that answer. Measured against api.github.com 2026-10-14 on
-    `GET /rate_limit` (issue #707): `Bearer\tnope` and `token\tnope` each carried a fresh
-    anonymous window's five, while `Bearer nope` / `token nope` carried none."""
+    the five `x-ratelimit-*` on that answer — the measurement
+    :func:`backlot.routers.github.refused_a_credential` records."""
     c, _ = gh_client
     r = c.get("/github/rate_limit", headers={"Authorization": authorization})
     assert r.status_code == 401
