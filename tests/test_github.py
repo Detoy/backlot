@@ -2290,6 +2290,40 @@ def test_github_401_says_which_credential_failed(gh_client, gh_admin_h, gh_org):
     assert bad_and_unversioned.json()["message"] == "Bad credentials"
 
 
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Bearer\tnope",
+        "token\tnope",
+    ],
+)
+def test_github_bad_credential_with_a_tab_after_its_scheme_carries_ratelimit_headers(
+    gh_client, authorization
+):
+    """A bad credential with a tab after its scheme is still 401 Bad credentials, but real puts
+    the five `x-ratelimit-*` on that answer. Measured against api.github.com 2026-10-14 on
+    `GET /rate_limit` (issue #707): `Bearer\tnope` and `token\tnope` each carried a fresh
+    anonymous window's five, while `Bearer nope` / `token nope` carried none."""
+    c, _ = gh_client
+    r = c.get("/github/rate_limit", headers={"Authorization": authorization})
+    assert r.status_code == 401
+    assert r.json() == {
+        "message": "Bad credentials",
+        "documentation_url": "https://docs.github.com/rest",
+        "status": "401",
+    }
+    limits = _ratelimit(r)
+    assert limits["limit"] == "60"
+    assert limits["remaining"] == "60"
+    assert limits["used"] == "0"
+    assert limits["resource"] == "core"
+    assert "reset" in limits
+    # Space-separated still strips them (unchanged).
+    space = c.get("/github/rate_limit", headers={"Authorization": "Bearer nope"})
+    assert space.status_code == 401
+    assert not any(n.startswith("x-ratelimit-") for n in space.headers)
+
+
 def test_github_documentation_url_names_the_route_that_failed(gh_client, gh_admin_h, gh_org):
     """Real's `documentation_url` is per-ENDPOINT — `/branches` names the list-branches anchor,
     `/tags` the list-tags one — so a single root URL would be a divergence on every 404. The table

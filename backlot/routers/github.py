@@ -457,14 +457,26 @@ def rate_limit_caller(request: Request) -> tuple[str, bool]:
 def refused_a_credential(request: Request) -> bool:
     """Whether a credential arrived and did not resolve — real's "Bad credentials" 401.
 
-    `Bearer` and `token` alike are refused with none of the five `x-ratelimit-*` headers and no
-    version echo, on `/repos/psf/requests` and on `/rate_limit`, and the address's `core` window
-    read `used: 13` before three of them and after — where an anonymous 401 on `/user/repos`
-    carries all five, counts, and echoes (measured against api.github.com 2026-09-21). A path no
-    route matches is answered the same way for a wider set of callers, see
+    `Bearer` and `token` separated from the token by a space are refused with none of the five
+    `x-ratelimit-*` headers and no version echo, on `/repos/psf/requests` and on `/rate_limit`, and
+    the address's `core` window read `used: 13` before three of them and after — where an anonymous
+    401 on `/user/repos` carries all five, counts, and echoes (measured against api.github.com
+    2026-09-21). A path no route matches is answered the same way for a wider set of callers, see
     ``backlot.main._some_github_route_matches``.
+
+    A tab after the scheme is still "Bad credentials" (`auth.bearer_token` accepts it) but real
+    puts the five `x-ratelimit-*` on that 401: measured against api.github.com 2026-10-14 on
+    `GET /rate_limit`, `Bearer\tnope` and `token\tnope` each answered 401 with a fresh anonymous
+    window's five (`limit: 60`, `remaining: 60`, `used: 0`, `resource: core`, `reset` an hour after
+    `Date`), while `Bearer nope` and `token nope` answered the same 401 with none of the five.
     """
-    return auth.bearer_token(request) is not None and auth.resolve_bearer(request) is None
+    if auth.bearer_token(request) is None or auth.resolve_bearer(request) is not None:
+        return False
+    # Space only: `split(None)` would treat a tab as the same separator, but real keeps the five
+    # headers when the scheme and token are joined by a tab (issue #707).
+    hdr = request.headers.get("authorization") or ""
+    scheme, sep, _rest = hdr.partition(" ")
+    return bool(sep) and scheme.lower() in ("bearer", "token")
 
 
 def rate_limit_headers(request: Request, status_code: int) -> dict[str, str]:
