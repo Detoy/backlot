@@ -174,8 +174,8 @@ def test_github_cursor_link_header_pages_a_listing_real_pages_by_cursor():
 
 
 def test_github_code_search_link_header_keeps_first_and_last_on_every_page():
-    """The five positions :func:`pagination.github_code_search_link_header` was measured at, which
-    are the five rules it does not share with a listing plus the one it does."""
+    """The five positions :func:`pagination.github_code_search_link_header` was measured at, and
+    the query every rel writes at page 5."""
 
     def h(page, total=45, per_page=5):
         return pg.github_code_search_link_header("http://x", {"q": "def"}, page, per_page, total)

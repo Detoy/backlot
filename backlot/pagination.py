@@ -355,9 +355,9 @@ def github_code_search_link_header(
       2026-10-13 `?q=repo:psf/requests+def+language:python` linked
       `q=repo%3Apsf%2Frequests%20def%20language%3Apython`.
     * the query is written `q`, then `page`, then `per_page`, on every rel and whatever order the
-      request sent them in: measured on 2026-10-13, `?q=repo:psf/requests+def&per_page=5&page=2`
-      and the three other orders of those parameters each link next as
-      `q=repo%3Apsf%2Frequests%20def&page=3&per_page=5`.
+      request sent them in: on 2026-10-14 each of the six orders of `q=repo:psf/requests+def`,
+      `per_page=5` and `page=2` linked next as `q=repo%3Apsf%2Frequests%20def&page=3&per_page=5`,
+      with prev, first and last differing only in the page number.
 
     `/search/issues` shares none of that and pages by :func:`github_link_header`. A result set that
     fits one page carries no header, which is the one rule all three surfaces share.
