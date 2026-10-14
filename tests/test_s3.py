@@ -524,6 +524,7 @@ _OPTIONS_QUERY_ROWS = [
         for path in _OPTIONS_KEY_PATHS
         for query in (
             "acl",
+            "annotation=x&acl",
             "partNumber=1",
             "partNumber=abc",
             "partNumber=1&uploadId=u",
@@ -1858,8 +1859,9 @@ _OBJECT_SUBRESOURCE_ROWS = [
     ("legal-hold", {}, 400, "application/xml", _OBJECT_LOCK, 400, _OBJECT_LOCK),
     ("retention", {}, 400, "application/xml", _OBJECT_LOCK, 400, _OBJECT_LOCK),
     ("torrent", {}, 405, "application/xml", _TORRENT, 405, _TORRENT),
-    (
-        "annotation",
+    *[
+      (
+        query,
         {},
         200,
         None,
@@ -1868,7 +1870,9 @@ _OBJECT_SUBRESOURCE_ROWS = [
         404,
         _DECL
         + "<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message><Key>{missing}</Key><RequestId/><HostId/></Error>",
-    ),
+    )
+        for query in ("annotation", "annotation=&annotation=x")
+    ],
     (
         "annotation&annotation-prefix=x&max-annotation-results=5",
         {},
@@ -2098,11 +2102,32 @@ _OPEN_QUOTE = (
     "open quoted span.</Message>" + _argued("response-content-type", 'a"b'),
 )
 
+# Real's refusal of a `response-` name outside the six overrides, the name in the message.
+_NOT_OVERRIDABLE = (
+    "{} is not in the set of overridable response headers. Please refer to the S3 API "
+    "documentation for a complete list of overridable response headers."
+)
+
+
+def _not_overridable(name, value):
+    """That refusal as a row of the table below asserts it."""
+    return (
+        400,
+        "InvalidArgument",
+        _NOT_OVERRIDABLE.format(name) + "</Message>" + _argued(name, value),
+    )
+
+
+_FOO_REFUSED = _not_overridable("response-foo", "x")
+_SIGV4_ONLY = (400, "InvalidRequest", "Please use Signature Version 4.")
+
 # Where each of an object's refusals sits against the bucket and the credential, as real answered
-# (2026-09-29, us-east-1): at a key in a bucket that does not exist (`absent`), at the object over a
-# bad secret (`tampered`), at the object signed (`present`) and at a key the bucket does not hold
-# (`missing`), two refusals at once among them; the query, the headers, and the status, code and
-# message fragment.
+# (us-east-1, each rule's date in its docstring): at a key in a bucket that does not exist
+# (`absent`), at the object over a bad secret (`tampered`), at the object signed (`present`) and at
+# a key the bucket does not hold (`missing`), two refusals at once among them; the query, the
+# headers, and the status, code and message fragment. The first column's other values are
+# credentials ``_unsigned_or_v2`` sends, each to the object but `unsigned-absent`, which goes where
+# `absent` does.
 # fmt: off
 _OBJECT_ORDER_ROWS = [
     ("absent", "annotation&max-annotation-results=0", {}, *_ANNOTATION_COUNT_RANGE),
@@ -2229,8 +2254,123 @@ _OBJECT_ORDER_ROWS = [
      400, "InvalidArgument", _argued("response-cache-control", "a\u0100b")),
     ("absent", "response-content-type=text/csv", {}, *_BUCKET_ABSENT),
     ("tampered", "response-content-type=text/csv", {}, *_SIGNATURE_MISMATCH),
+    # A `response-` name outside the six, as written and with its first value, the parses before it
+    # and the refusals after it, and which of two parameters is named
+    # (``backlot.routers.s3._response_override_refusal``).
+    ("present", "response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "response-foo", {}, *_not_overridable("response-foo", "")),
+    ("present", "response-=x", {}, *_not_overridable("response-", "x")),
+    ("present", "response-Content-Type=text/csv", {},
+     *_not_overridable("response-Content-Type", "text/csv")),
+    ("present", "response-foo=a%2Fb&response-foo=c", {}, *_not_overridable("response-foo", "a/b")),
+    ("absent", "response-foo=x", {}, *_FOO_REFUSED),
+    ("tampered", "response-foo=x", {}, *_FOO_REFUSED),
+    ("missing", "response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "acl&tagging&response-foo=x", {},
+     400, "InvalidArgument", "Conflicting query string parameters: acl, tagging"),
+    ("present", "annotationName=x&response-content-type=a%22b", {},
+     400, "InvalidArgument", "Unexpected query string parameter"),
+    ("present", "attributes&response-foo=x", _attributes("garbage"), *_BAD_ATTRIBUTE),
+    ("present", "annotation&max-annotation-results=abc&response-content-type=a%22b", {},
+     *_ANNOTATION_COUNT_PARSE),
+    ("absent", "uploadId=u&max-parts=abc&response-foo=x", {},
+     400, "InvalidArgument", "Provided max-parts not an integer or within integer range"),
+    ("present", "max-parts=abc&response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "uploadId=u&partNumber=1&response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "website=x&response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "location&versionId=x&response-content-type=a%22b", {}, *_OPEN_QUOTE),
+    ("absent", "versionId=&response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "acl&response-foo=x", {}, *_FOO_REFUSED),
+    ("present", "response-foo=x&partNumber=abc", {}, *_FOO_REFUSED),
+    ("present", "response-foo=x", {"If-Match": '"0000"'}, *_FOO_REFUSED),
+    ("present", "response-foo=x", {"Range": "bytes=999-"}, *_FOO_REFUSED),
+    ("present", "response-foo=%ED%95%9C", {}, *_not_overridable("response-foo", "\ud55c")),
+    ("present", "response-foo=a%22b", {}, *_not_overridable("response-foo", 'a"b')),
+    ("present", "response-foo=x&response-content-type=a%22b", {}, *_OPEN_QUOTE),
+    ("present", "response-aaa=x&response-content-type=a%22b", {}, *_not_overridable("response-aaa", "x")),
+    ("present", "response-content-language=%ED%95%9C&response-content-type=a%22b", {}, *_OPEN_QUOTE),
+    ("present", "response-content-type=a%22b&response-cache-control=%ED%95%9C", {},
+     400, "InvalidArgument", "ISO-8859-1.</Message>" + _argued("response-cache-control", "\ud55c")),
+    ("present", "response-b=1&response-B=2", {}, *_not_overridable("response-b", "1")),
+    ("present", "response-bar=1&response-server=2", {}, *_not_overridable("response-server", "2")),
+    # The parses `backlot.routers.s3._object_parse` puts ahead of a `versionId`.
+    ("present", "attributes&versionId=", _attributes("garbage"), *_BAD_ATTRIBUTE),
+    ("present", "uploadId=u&max-parts=abc&versionId=x", {},
+     400, "InvalidArgument", "Provided max-parts not an integer or within integer range"),
+    ("present", "annotation=x&versionId=bogus", {}, 400, "InvalidArgument", _BAD_VERSION),
+    # Unsigned and Signature Version 2 annotation requests, after the refusals before them and ahead
+    # of a `versionId` with a value, a continuation token and the bucket; a credential refused for
+    # its shape is that refusal, and another operation, a valued `?annotation=x` among them, is not
+    # refused for being unsigned or V2 (``backlot.routers.s3._sigv4_only_refusal``).
+    ("unsigned", "annotation", {}, *_SIGV4_ONLY),
+    ("unsigned", "annotation&annotationName=x", {}, *_SIGV4_ONLY),
+    ("unsigned", "annotation&annotationName=", {}, *_SIGV4_ONLY),
+    ("unsigned-absent", "annotation", {}, *_SIGV4_ONLY),
+    ("empty", "annotation", {}, *_SIGV4_ONLY),
+    ("unsigned", "annotation&X-Amz-Signature=00", {}, *_SIGV4_ONLY),
+    ("unsigned", "annotation&AWSAccessKeyId=x", {}, *_SIGV4_ONLY),
+    ("sigv2", "annotation", {}, *_SIGV4_ONLY),
+    ("sigv2", "annotation&annotationName=x", {}, *_SIGV4_ONLY),
+    ("sigv2-tampered", "annotation", {}, *_SIGV4_ONLY),
+    ("sigv2-unknown-key", "annotation", {}, *_SIGV4_ONLY),
+    ("sigv2-query", "annotation", {}, *_SIGV4_ONLY),
+    ("unsigned", "annotation&max-annotation-results=abc", {}, *_ANNOTATION_COUNT_PARSE),
+    ("sigv2", "annotation&max-annotation-results=0", {}, *_ANNOTATION_COUNT_RANGE),
+    ("unsigned", "annotation&response-foo=x", {}, *_FOO_REFUSED),
+    ("sigv2", "annotation&response-content-type=a%22b", {}, *_OPEN_QUOTE),
+    ("unsigned", "annotation&versionId=", {}, *_VERSION_ID_EMPTY),
+    ("unsigned", "annotation&acl", {},
+     400, "InvalidArgument", "Conflicting query string parameters: acl, annotation"),
+    ("unsigned", "annotation&versionId=x", {}, *_SIGV4_ONLY),
+    ("unsigned", "annotation&continuation-token=garbage", {}, *_SIGV4_ONLY),
+    ("bearer", "annotation", {}, 400, "InvalidArgument", "Unsupported Authorization Type"),
+    ("no-space", "annotation", {}, 400, "InvalidArgument", "one and only one ' ' (space) required"),
+    ("sigv2-skewed", "annotation", {}, 403, "RequestTimeTooSkewed", "is too large"),
+    ("unsigned", "annotation&AWSAccessKeyId=x&Signature=y", {},
+     403, "AccessDenied", "Query-string authentication requires the Signature, Expires"),
+    ("unsigned-absent", "acl", {}, *_BUCKET_ABSENT),
+    ("unsigned-absent", "annotation=x", {}, *_BUCKET_ABSENT),
+    ("sigv2-tampered", "acl", {}, *_SIGNATURE_MISMATCH),
 ]
 # fmt: on
+
+
+def _unsigned_or_v2(base_url, path, token, where):
+    """``(url, headers)`` for a request sent unsigned (`unsigned`, `unsigned-absent`), with an
+    empty `Authorization` (`empty`), with Signature Version 2 in the header over the string real
+    signs (`sigv2`), over a bad secret (`sigv2-tampered`), with an access key no token holds
+    (`sigv2-unknown-key`) or dated two hours back (`sigv2-skewed`), in the query over the string
+    real signs (`sigv2-query`), or with a header refused for its shape (`bearer`, `no-space`)."""
+    import time
+    from email.utils import formatdate
+    from urllib.parse import quote
+
+    url = f"{base_url}{path}"
+    fixed = {
+        "empty": {"Authorization": ""},
+        "bearer": {"Authorization": "Bearer x"},
+        "no-space": {"Authorization": "AWS"},
+    }
+    if where in fixed:
+        return url, fixed[where]
+    if where.startswith("unsigned"):
+        return url, {}
+    key, secret = synth.s3_access_key_id(token), synth.s3_secret_access_key(token)
+    raw_path, _, query = path.partition("?")
+    if where == "sigv2-query":
+        expires = str(int(time.time()) + 600)
+        signature = sigv2.sign(secret, sigv2.string_to_sign("GET", {}, expires, raw_path, query))
+        return (
+            f"{url}&AWSAccessKeyId={key}&Expires={expires}&Signature={quote(signature, safe='')}",
+            {},
+        )
+    date = formatdate(time.time() - (7200 if where == "sigv2-skewed" else 0), usegmt=True)
+    signing = "x" * 40 if where == "sigv2-tampered" else secret
+    key = _UNKNOWN if where == "sigv2-unknown-key" else key
+    signature = sigv2.sign(
+        signing, sigv2.string_to_sign("GET", {"date": date}, date, raw_path, query)
+    )
+    return url, {"date": date, "authorization": f"AWS {key}:{signature}"}
 
 
 @pytest.mark.parametrize(
@@ -2244,19 +2384,24 @@ _OBJECT_ORDER_ROWS = [
 def test_an_objects_subresource_refusals_sit_where_real_puts_them(
     live_server, where, query, headers, status, code, fragment
 ):
-    """The parses before the bucket and the credential, the version and the header checks after
-    them and before the key, and the rest after the key, as in the table above, none of them
-    carrying the encryption header an object's own answer does."""
+    """The parses before the bucket and the credential, an annotation operation's refusal of an
+    unsigned or V2 credential after them, the version and the header checks after those and before
+    the key, and the rest after the key, as in the table above, none of them carrying the encryption
+    header an object's own answer does."""
     import httpx
 
     base_url, settings = live_server
     path = {
         "absent": "/s3/no-such-bucket/k.txt",
+        "unsigned-absent": "/s3/no-such-bucket/k.txt",
         "missing": "/s3/eng-artifacts/no/such.md",
     }.get(where, OBJECT_PATH) + (f"?{query}" if query else "")
-    url, signed = _sign_get(
-        base_url, path, settings.admin_token, tamper=where == "tampered", extra_headers=headers
-    )
+    if where in ("absent", "missing", "present", "tampered"):
+        url, signed = _sign_get(
+            base_url, path, settings.admin_token, tamper=where == "tampered", extra_headers=headers
+        )
+    else:
+        url, signed = _unsigned_or_v2(base_url, path, settings.admin_token, where)
     r = httpx.get(url, headers=signed)
     assert r.status_code == status
     assert f"<Code>{code}</Code>" in r.text and fragment in r.text
@@ -2283,6 +2428,15 @@ _OBJECT_ANSWER_ROWS = [
     ("", {"x-amz-checksum-mode": "ENABLED", "Range": "bytes=0-9"}, 206, _FIRST_TEN, False),
     ("", {"x-amz-content-sha256": "STREAMING-AWS4-HMAC-SHA256-PAYLOAD"}, 200, None, False),
     ("", {"x-amz-content-sha256": "0" * 64}, 200, None, False),
+    # A valued `annotation` is GetObject's, beside GetObject's own parameters
+    # (``backlot.routers.s3._key_selected``).
+    ("annotation=x", {}, 200, None, False),
+    ("annotation=%20", {}, 200, None, False),
+    ("annotation=x&annotation=", {}, 200, None, False),
+    ("annotation=x&annotationName=y", {}, 200, None, False),
+    ("annotation=x&max-annotation-results=abc", {}, 200, None, False),
+    ("annotation=x&versionId=null", {}, 200, None, False),
+    ("annotation=x&partNumber=1", {}, 206, _FULL_RANGE, False),
 ]
 
 
@@ -2344,6 +2498,7 @@ _RESPONSE_OVERRIDE_ROWS = [
         {"content-type": "text/csv", "cache-control": "no-cache"},
     ),
     ("response-content-type=text/csv", {"Range": "bytes=0-3"}, {"content-type": "text/csv"}),
+    ("annotation=x&response-content-type=text/csv", {}, {"content-type": "text/csv"}),
     ("Response-Content-Type=text/csv", {}, {}),
     # the first value of a repeated name
     ("response-content-type=a/b&response-content-type=c/d", {}, {"content-type": "a/b"}),
@@ -2456,6 +2611,22 @@ _UNSIGNED_OVERRIDE_ROWS = [
         404,
     ),
     (f"{OBJECT_PATH}?acl&response-content-type=text/csv", 404, "NoSuchBucket", _NO_BUCKET, 405),
+    # A `response-` name outside the six, refused ahead of the anonymous caller's 400
+    # (``backlot.routers.s3._response_override_refusal``).
+    (
+        f"{OBJECT_PATH}?response-foo=x",
+        400,
+        "InvalidArgument",
+        _NOT_OVERRIDABLE.format("response-foo"),
+        400,
+    ),
+    (
+        f"{OBJECT_PATH}?response-content-type=text/csv&response-foo=x",
+        400,
+        "InvalidArgument",
+        _NOT_OVERRIDABLE.format("response-foo"),
+        400,
+    ),
 ]
 
 
@@ -2508,9 +2679,12 @@ def test_object_response_overrides_do_not_bypass_credentials_or_acl(live_server,
         (OBJECT_PATH + "?response-content-type=text/csv", {"Range": "bytes=1000-2000"}, 416),
         ("/s3/eng-artifacts/missing?response-content-type=text/csv", {}, 404),
         (OBJECT_PATH + "?tagging&response-content-type=text/csv", {}, 200),
+        ("/s3/eng-artifacts?response-content-type=text/csv", {}, 200),
+        ("/s3/eng-artifacts?location&response-content-type=text/csv", {}, 200),
+        ("/s3/no-such-bucket?response-content-type=text/csv", {}, 404),
     ],
 )
-def test_object_response_overrides_do_not_relabel_other_answers(
+def test_response_overrides_do_not_relabel_other_answers(
     live_server, method, path, extra_headers, status
 ):
     base_url, settings = live_server
@@ -2916,6 +3090,12 @@ _BOGUS_ENCODING = (
     "Invalid Encoding Method specified in Request",
     _argued("encoding-type", "bogus"),
 )
+_FOO_AT_A_BUCKET = (400, _NOT_OVERRIDABLE.format("response-foo"), _argued("response-foo", "x"))
+_OPEN_QUOTE_AT_A_BUCKET = (
+    400,
+    "Header value contained an open quoted span.",
+    _argued("response-content-type", 'a"b'),
+)
 
 # A query parameter real refuses, and which of two it refuses when both are sent: the request, and
 # the status, code, message and members of real's answer (measured 2026-09-29 against us-east-1).
@@ -3022,6 +3202,35 @@ _PARAMETER_ROWS = [
      *_MAX_KEYS_ABC),
     ("GET", "/s3/eng-artifacts?versions&max-keys=abc&acl", 400,
      "Conflicting query string parameters: acl, versions", _argued("ResourceType", "acl")),
+    # A `response-` parameter at a bucket's path, where an override sets nothing, what is refused
+    # before it and what after it (``backlot.routers.s3._response_override_refusal``).
+    ("GET", "/s3/eng-artifacts?list-type=2&response-foo=x", *_FOO_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?location&response-foo=x", *_FOO_AT_A_BUCKET),
+    ("GET", "/s3/no-such-bucket?response-foo=x", *_FOO_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?response-content-type=%ED%95%9C", 400,
+     "Header value cannot be represented using ISO-8859-1.",
+     _argued("response-content-type", "\ud55c")),
+    ("GET", "/s3/eng-artifacts?location&response-content-type=a%22b", *_OPEN_QUOTE_AT_A_BUCKET),
+    ("GET", "/s3/no-such-bucket?response-content-type=a%22b", *_OPEN_QUOTE_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?response-foo=x&response-content-type=a%22b",
+     *_OPEN_QUOTE_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?response-content-type=a%22b&response-content-language=%ED%95%9C",
+     *_OPEN_QUOTE_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?max-keys=abc&response-foo=x", *_MAX_KEYS_ABC),
+    ("GET", "/s3/eng-artifacts?list-type=2&marker=x&response-foo=x", 400,
+     "Marker unsupported with REST.GET.BUCKET in list-type=2", _argued("marker")),
+    ("GET", "/s3/eng-artifacts?uploads&max-uploads=abc&response-content-type=a%22b", 400,
+     "Provided max-uploads not an integer or within integer range", _argued("max-uploads", "abc")),
+    ("GET", "/s3/eng-artifacts?versions&version-id-marker=x&response-foo=x", *_MARKER_WITHOUT_KEY),
+    ("GET", "/s3/eng-artifacts?acl&location&response-content-type=a%22b", 400,
+     "Conflicting query string parameters: acl, location", _argued("ResourceType", "acl")),
+    ("GET", "/s3/eng-artifacts?partNumber=1&response-foo=x", 400,
+     "Object must have a valid key name.", ""),
+    ("GET", "/s3/eng-artifacts?versionId=x&response-foo=x", *_FOO_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?website=v&response-content-type=a%22b", *_OPEN_QUOTE_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?max-keys=-1&response-foo=x", *_FOO_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?encoding-type=bogus&response-foo=x", *_FOO_AT_A_BUCKET),
+    ("GET", "/s3/eng-artifacts?uploads&response-foo=x", *_FOO_AT_A_BUCKET),
 ]
 # fmt: on
 
@@ -3153,6 +3362,20 @@ _HEAD_ROWS = [
     ("/s3/no-such-bucket/a.txt?response-content-type=a%22b", "admin", {}, 400, None),
     (f"{OBJECT_PATH}?acl&response-content-type=a%22b", "tampered", {}, 400, None),
     (f"{OBJECT_PATH}?response-content-type=text/csv", None, {}, 400, None),
+    # A `response-` name, and a value at a bucket's path, ahead of a selector's 405, and ListParts'
+    # integers, which a HEAD leaves to that 405 (``backlot.routers.s3._object_parse``).
+    (f"{OBJECT_PATH}?response-foo=x", "admin", {}, 400, None),
+    ("/s3/eng-artifacts?location&response-content-type=a%22b", "admin", {}, 400, None),
+    (f"{OBJECT_PATH}?uploadId=u&max-parts=abc&response-content-type=a%22b", "admin", {}, 400, None),
+    (f"{OBJECT_PATH}?uploadId=u&max-parts=abc", "admin", {}, 405, None),
+    # An annotation operation unsigned, ahead of the bucket and of the 405 a SigV4 HEAD gets
+    # (``backlot.routers.s3._sigv4_only_refusal``).
+    (f"{OBJECT_PATH}?annotation", None, {}, 400, None),
+    ("/s3/no-such-bucket/a.txt?annotation", None, {}, 400, None),
+    (f"{OBJECT_PATH}?annotation&max-annotation-results=abc", None, {}, 400, None),
+    (f"{OBJECT_PATH}?annotation", "admin", {}, 405, None),
+    (f"{OBJECT_PATH}?annotation=x", "admin", {}, 200, len(OBJECT_TEXT)),
+    (f"{OBJECT_PATH}?annotation=x&acl", "admin", {}, 405, None),
 ]
 # fmt: on
 
