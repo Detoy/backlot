@@ -5695,10 +5695,12 @@ def test_github_every_response_carries_the_five_ratelimit_headers_and_rate_limit
             other = c.get("/github/rate_limit", headers={"Authorization": spelling})
             assert other.status_code == 401
             assert not any(n.startswith("x-ratelimit-") for n in other.headers), spelling
-        # after a tab rather than a space, the same 401 carries the five of a window it has not used
+        # after a tab rather than a space, the same 401 carries the five of a window it has not
+        # used, and still no echo
         for spelling in ("Bearer\tnope", "token\tnope", "Bearer\t nope"):
             tab = c.get("/github/rate_limit", headers={"Authorization": spelling})
             assert (tab.status_code, tab.json()) == (401, refused.json()), spelling
+            assert "x-github-api-version-selected" not in tab.headers, spelling
             limits = _ratelimit(tab)
             assert [limits[k] for k in ("limit", "remaining", "used", "resource")] == [
                 "60",
@@ -5880,7 +5882,15 @@ def test_github_rate_limit_refuses_an_anonymous_caller_too_and_the_switch_turns_
             assert rate_limit_slash.text == "404 Not Found"
             assert not any(n.startswith("x-ratelimit-") for n in rate_limit_slash.headers)
 
-        # a bearer that does not resolve is its own 401 on the spent window, not the refusal
+        # a bearer after a tab is counted in the unparseable window instead, so it is that window's
+        # refusal once two `Digest x` have spent it (see `refused_without_a_window`)
+        for _ in range(2):
+            digest = c.get("/github/user/repos", headers={"Authorization": "Digest x"})
+            assert digest.status_code == 401
+        tab_spent = c.get("/github/user/repos", headers={"Authorization": "Bearer\tnope"})
+        assert (tab_spent.status_code, tab_spent.json()) == (403, refused.json())
+
+        # `Bearer nope` is its own 401 on both spent windows, not the refusal
         bad_bearer = c.get("/github/user/repos", headers={"Authorization": "Bearer nope"})
         assert bad_bearer.status_code == 401
         assert not any(n.startswith("x-ratelimit-") for n in bad_bearer.headers)
