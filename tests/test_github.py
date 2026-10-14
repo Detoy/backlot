@@ -2290,39 +2290,6 @@ def test_github_401_says_which_credential_failed(gh_client, gh_admin_h, gh_org):
     assert bad_and_unversioned.json()["message"] == "Bad credentials"
 
 
-@pytest.mark.parametrize(
-    "authorization",
-    [
-        "Bearer\tnope",
-        "token\tnope",
-    ],
-)
-def test_github_bad_credential_with_a_tab_after_its_scheme_carries_ratelimit_headers(
-    gh_client, authorization
-):
-    """A bad credential with a tab after its scheme is still 401 Bad credentials, but real puts
-    the five `x-ratelimit-*` on that answer — the measurement
-    :func:`backlot.routers.github.refused_a_credential` records."""
-    c, _ = gh_client
-    r = c.get("/github/rate_limit", headers={"Authorization": authorization})
-    assert r.status_code == 401
-    assert r.json() == {
-        "message": "Bad credentials",
-        "documentation_url": "https://docs.github.com/rest",
-        "status": "401",
-    }
-    limits = _ratelimit(r)
-    assert limits["limit"] == "60"
-    assert limits["remaining"] == "60"
-    assert limits["used"] == "0"
-    assert limits["resource"] == "core"
-    assert "reset" in limits
-    # Space-separated still strips them (unchanged).
-    space = c.get("/github/rate_limit", headers={"Authorization": "Bearer nope"})
-    assert space.status_code == 401
-    assert not any(n.startswith("x-ratelimit-") for n in space.headers)
-
-
 def test_github_documentation_url_names_the_route_that_failed(gh_client, gh_admin_h, gh_org):
     """Real's `documentation_url` is per-ENDPOINT — `/branches` names the list-branches anchor,
     `/tags` the list-tags one — so a single root URL would be a divergence on every 404. The table
@@ -5705,6 +5672,21 @@ def test_github_every_response_carries_the_five_ratelimit_headers_and_rate_limit
         # window — the address's, where it would have landed, stays put
         assert not any(n.startswith("x-ratelimit-") for n in refused.headers)
         assert "x-github-api-version-selected" not in refused.headers
+        for spelling in ("bearer nope", "TOKEN nope"):
+            other = c.get("/github/rate_limit", headers={"Authorization": spelling})
+            assert other.status_code == 401
+            assert not any(n.startswith("x-ratelimit-") for n in other.headers), spelling
+        # after a tab rather than a space, the same 401 carries the five of a window it has not used
+        for spelling in ("Bearer\tnope", "token\tnope", "Bearer\t nope"):
+            tab = c.get("/github/rate_limit", headers={"Authorization": spelling})
+            assert (tab.status_code, tab.json()) == (401, refused.json()), spelling
+            limits = _ratelimit(tab)
+            assert [limits[k] for k in ("limit", "remaining", "used", "resource")] == [
+                "60",
+                "60",
+                "0",
+                "core",
+            ], spelling
         assert c.get("/github/rate_limit").json()["resources"]["core"]["used"] == 2
 
         # a search endpoint's name carries `search` past the route it serves; an empty rest and a
@@ -5743,6 +5725,10 @@ def test_github_every_response_carries_the_five_ratelimit_headers_and_rate_limit
         assert (first["limit"], second["limit"]) == ("60", "60")
         assert int(second["used"]) == int(first["used"]) + 1
         assert int(first["used"]) < address  # its own window, not the address's
+        # and so is a bearer after a tab, though it is refused as Bad credentials
+        tab = c.get("/github/user/repos", headers={"Authorization": "Bearer\tnope"})
+        assert tab.json()["message"] == "Bad credentials"
+        assert int(_ratelimit(tab)["used"]) == int(second["used"]) + 1
         assert int(_ratelimit(c.get("/github/user/repos"))["used"]) == address + 1
 
         # a minute on, the two search windows are new ones where `core`'s is the one it was
