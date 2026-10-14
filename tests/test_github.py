@@ -2982,9 +2982,8 @@ def test_github_a_page_url_omits_a_page_size_the_caller_did_not_send(
     ],
 )
 def test_github_code_search_page_links_write_page_before_per_page(gh_client, gh_admin_h, qs):
-    """Real writes a code-search page link's query as `q`, `page`, `per_page`, whatever order the
-    request sent them in (measured on :func:`backlot.pagination.github_code_search_link_header`),
-    so each order here links the same url."""
+    """Each order the request sends its parameters in links the same url, in the order
+    :func:`backlot.pagination.github_code_search_link_header` records."""
     c, _ = gh_client
     r = c.get(f"/github/search/code?{qs}", headers=gh_admin_h)
     assert r.status_code == 200

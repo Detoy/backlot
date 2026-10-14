@@ -175,13 +175,19 @@ def test_github_cursor_link_header_pages_a_listing_real_pages_by_cursor():
 
 def test_github_code_search_link_header_keeps_first_and_last_on_every_page():
     """The five positions :func:`pagination.github_code_search_link_header` was measured at, which
-    are the four rules it does not share with a listing plus the one it does."""
+    are the five rules it does not share with a listing plus the one it does."""
 
     def h(page, total=45, per_page=5):
         return pg.github_code_search_link_header("http://x", {"q": "def"}, page, per_page, total)
 
     assert list(_pages(h(1)).items()) == [("next", 2), ("first", 1), ("last", 9)]
     assert list(_pages(h(5)).items()) == [("next", 6), ("prev", 4), ("first", 1), ("last", 9)]
+    assert re.findall(r"\?([^>]*)>", h(5)) == [
+        "q=def&page=6&per_page=5",
+        "q=def&page=4&per_page=5",
+        "q=def&page=1&per_page=5",
+        "q=def&page=9&per_page=5",
+    ]
     assert list(_pages(h(9)).items()) == [("prev", 8), ("first", 1), ("last", 9)]
     assert list(_pages(h(99)).items()) == [("prev", 98), ("first", 1), ("last", 9)]
     assert h(1, per_page=100) is None
@@ -189,20 +195,6 @@ def test_github_code_search_link_header_keeps_first_and_last_on_every_page():
     # the size written is the one applied — this builder takes no spelling from the caller, which
     # is the cell `/search/issues` differs on
     assert "per_page=30" in h(1, per_page=30)
-
-
-def test_github_code_search_link_header_writes_page_before_per_page():
-    """Every rel of a `/search/code` page link writes `q`, then `page`, then `per_page`, as real
-    does (the measurement is on :func:`pagination.github_code_search_link_header`)."""
-    h = pg.github_code_search_link_header("http://x/search/code", {"q": "def"}, 5, 5, 45)
-    urls = re.findall(r"<([^>]*)>", h)
-    assert _link_rel_names(h) == ["next", "prev", "first", "last"]
-    assert [u.split("?", 1)[1] for u in urls] == [
-        "q=def&page=6&per_page=5",
-        "q=def&page=4&per_page=5",
-        "q=def&page=1&per_page=5",
-        "q=def&page=9&per_page=5",
-    ]
 
 
 def test_github_cursor_offset_prefers_the_cursor_over_the_page():
