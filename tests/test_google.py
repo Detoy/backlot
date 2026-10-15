@@ -1926,6 +1926,9 @@ _DRIVE_CHECK_ROWS = [
     ("/drive/v3/files/{pdf}/export", "mimeType=text/plain", "admin", (403, "fileNotExportable", None, None)),
     # the empty value is present, so in the order `drive_files_export` records it meets the 403
     ("/drive/v3/files/{pdf}/export", "mimeType=", "admin", (403, "fileNotExportable", None, None)),
+    # a folder is synthesized rather than stored, and is refused as the PDF is, not as a file that
+    # does not exist
+    ("/drive/v3/files/{folder}/export", "mimeType=text/plain", "admin", (403, "fileNotExportable", None, "Export only supports Docs Editors files.")),
     ("/drive/v3/files/{doc}", "alt=media", "admin", (403, "fileNotDownloadable", "alt", None)),
     # the shared-drive items need a companion flag, which the same spelling turns on
     ("/drive/v3/files", "includeItemsFromAllDrives=true", "admin", _SHARED_DRIVES),
@@ -2022,6 +2025,7 @@ def test_drive_answers_each_check_with_reals_status_and_reason(
     ids = {
         "doc": doc,
         "pdf": _drive_find(client, admin_h, "Whitepaper")["id"],
+        "folder": _drive_ids(client, admin_h, q=f"mimeType='{FOLDER_MIME}'")[0],
         "hidden": _drive_find(client, admin_h, "Q1 Revenue Model")["id"],
         "nope": "nosuchfile000",
         "issued": issued.json()["nextPageToken"],
